@@ -132,7 +132,7 @@ def sign(el_to_sign):
     return signature
 
 
-def make_assertion(resp, acs, irt, iss, username, validity):
+def make_assertion(resp, acs, irt, iss, username, validity, sp_entity_id):
     assertion = subelement(resp, 'saml2:Assertion',
                            attrib={'ID': make_id(),
                                    'IssueInstant': tsnow(),
@@ -149,11 +149,35 @@ def make_assertion(resp, acs, irt, iss, username, validity):
                attrib={'InResponseTo': irt,
                        'NotOnOrAfter': tsnow(validity),
                        'Recipient': acs})
+    # new stuff
+    attribute_statement = subelement(assertion, 'saml2:AttributeStatement')
+    email_attr = subelement(attribute_statement, 'saml2:Attribute', attrib={
+        "Name": "email", 
+        "NameFormat": "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
+        })
+    email_val = subelement(email_attr, "saml2:AttributeValue")
+    email_val.text=username
+
+    name_attr = subelement(attribute_statement, 'saml2:Attribute', attrib={
+        "Name": "firstName", 
+        "NameFormat": "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
+        })
+    name_val = subelement(name_attr, "saml2:AttributeValue")
+    name_val.text="First"
+
+    last_attr = subelement(attribute_statement, 'saml2:Attribute', attrib={
+        "Name": "lastName", 
+        "NameFormat": "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
+        })
+    last_val = subelement(last_attr, "saml2:AttributeValue")
+    last_val.text="Last"
+
+    # end
     cond = subelement(assertion, 'saml2:Conditions',
                       attrib={'NotBefore': tsnow(-validity),
                               'NotOnOrAfter': tsnow(validity)})
     aud_rest = subelement(cond, 'saml2:AudienceRestriction')
-    subelement(aud_rest, 'saml2:Audience').text = acs  # todo urlparse
+    subelement(aud_rest, 'saml2:Audience').text = sp_entity_id
     authn = subelement(assertion, 'saml2:AuthnStatement',
                        attrib={'AuthnInstant': iss,
                                'SessionIndex': irt})
@@ -162,7 +186,7 @@ def make_assertion(resp, acs, irt, iss, username, validity):
     return assertion, issuer  # sig must be placed after issuer (xsl doc)
 
 
-def make_response(acs, irt, iss, username,
+def make_response(acs, irt, iss, username, sp_entity_id,
                   sign_assertion=True,
                   sign_response=False,
                   validity=300):
@@ -177,7 +201,7 @@ def make_response(acs, irt, iss, username,
     subelement(status, 'samlp:StatusCode',
                attrib={'Value': status_success})
     assertion, as_issuer = make_assertion(resp, acs, irt, iss, username,
-                                          validity)
+                                          validity, sp_entity_id)
 
     ET.cleanup_namespaces(resp)
     if sign_assertion:
@@ -228,7 +252,8 @@ def root():
     relay_state = request.values.get('RelayState')
     return f'''<HTML><BODY><CENTER><H1>Login - Step 1</H1>
 <FORM ACTION="https://{HOST}:{PORT}/login" METHOD=POST>
-Username: <INPUT TYPE=TEXT VALUE="admin" NAME="username"><BR>
+Service Provider Metadata Entity ID +/-: <INPUT TYPE=TEXT NAME="sp_entity_id" VALUE="https://www.okta.com/saml2/service-provider/spkrktcxhbfmkgfelqsv"><BR>
+Username: <INPUT TYPE=TEXT VALUE="change_me@example.org" NAME="username"><BR>
 InResponseTo: <INPUT TYPE=TEXT VALUE="{id_}" NAME="irt"><BR>
 IssueInstant: <INPUT TYPE=TEXT VALUE="{iss}" NAME="iss"><BR>
 ACS: <INPUT TYPE=TEXT VALUE="{acs}" NAME="acs"><BR>
@@ -238,7 +263,6 @@ Sign Response: <INPUT TYPE=CHECKBOX NAME="sr" CHECKED><BR>
 Validity +/-: <INPUT TYPE=TEXT NAME="valid" VALUE=3600> sec<BR>
 <INPUT TYPE=SUBMIT VALUE="Submit"></FORM></BODY></HTML>'''
 
-
 @app.route("/login", methods=['POST'])
 def login():
     acs = request.values.get('acs')
@@ -247,8 +271,9 @@ def login():
     print(request.values.get('sa'))
     relay_state = request.values.get('RelayState')
     username = request.values.get('username')
+    sp_entity_id = request.values.get('sp_entity_id')
     response_xml = c14n(make_response(
-        acs, irt, iss, username,
+        acs, irt, iss, username, sp_entity_id,
         validity=int(request.values.get('valid')),
         sign_assertion=request.values.get('sa'),
         sign_response=request.values.get('sr')))
